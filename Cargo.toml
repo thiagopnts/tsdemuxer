@@ -1,0 +1,7 @@
+[package]
+name = "tsdemuxer"
+version = "0.1.0"
+authors = ["Thiago Pontes <github@thiago.me>"]
+
+[dependencies]
+byteorder = "1"
