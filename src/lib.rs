@@ -2,8 +2,85 @@ extern crate byteorder;
 use std::io::{Read};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
+#[derive(Debug, PartialEq)]
+pub struct PID(u16);
+
+pub enum StreamType {
+    MPEG1Video = 0x01,
+    MPEG2Video = 0x02,
+    MPEG1Audio = 0x03,
+    H264 = 0x1B,
+}
+
+impl StreamType {
+
+    pub fn from_u8(byte: u8) -> Result<Self, String> {
+        use StreamType::*;
+        match byte {
+            0x01 => Ok(MPEG1Video),
+            0x02 => Ok(MPEG2Video),
+            0x03 => Ok(MPEG1Audio),
+            0x1B => Ok(H264),
+            _ => Err(format!("unknown/unimplemented stream type: {}", byte)),
+        }
+    }
+}
+
+impl PID {
+    pub fn new(pid: u16) -> Self {
+        PID(pid)
+    }
+
+    pub fn as_u16(&self) -> u16 {
+        self.0
+    }
+
+    pub fn read_from<R: Read>(mut reader: R) -> Self {
+        let chunk = reader.read_u16::<BigEndian>().unwrap();
+        PID(chunk & 0b0001_1111_1111_1111)
+    }
+}
+
+pub struct PAT {
+    transport_stream_id: u16,
+    version_number: u8,
+}
+
+pub struct PMT {
+    program_num: u16,
+    pcr_pid: Option<PID>,
+    version_number: u8,
+    table: Vec<ESInfo>,
+}
+
+pub struct ESInfo {
+    stream_type: StreamType,
+    elementary_pid: PID,
+    descriptors: Vec<Descriptor>,
+}
+
+pub struct Descriptor {
+    tag: u8,
+    data: Vec<u8>,
+}
+
 pub struct TSPacket {
     header: TSPacketHeader,
+    payload: TSPayload,
+    table: Vec<ProgramAssociation>,
+}
+
+struct ProgramAssociation {
+    program_num: u16,
+    program_map_pid: PID,
+}
+
+pub enum TSPayload {
+    PAT(PAT),
+    PMT(PMT),
+//    PES(PES),
+//    Null(Null),
+//    Raw(Bytes),
 }
 
 #[derive(PartialEq, Debug)]
@@ -18,7 +95,7 @@ pub enum TransportScramblingControl {
 pub struct TSPacketHeader {
     pub transport_error_indicator: bool,
     pub transport_priority: bool,
-    pub pid: u16,
+    pub pid: PID,
     pub transport_scrambling_control: TransportScramblingControl,
     pub continuity_counter: u8,
 }
@@ -42,9 +119,9 @@ impl TSPacketHeader {
         }
         let upper_header = reader.read_u16::<BigEndian>().unwrap();
         println!("{:b}", upper_header);
-        let transport_error_indicator = (upper_header & 0b1000_0000_0000_0000) != 0;
-        let transport_priority = (upper_header & 0b0010_0000_0000_0000) != 0;
-        let pid = upper_header & 0b0001_1111_1111_1111;
+        let transport_error_indicator = (upper_header & 0x8000) != 0;
+        let transport_priority = (upper_header & 0x2000) != 0;
+        let raw_pid = upper_header & 0x1FFF;
         let lower_header = reader.read_u8().unwrap();
         let transport_scrambling_control = match lower_header >> 6 {
             0x0 => NotScrambled,
@@ -57,6 +134,7 @@ impl TSPacketHeader {
             return Err(HeaderParseError::UnkownTransportScrambling);
         }
         let continuity_counter = lower_header & 0b1111;
+        let pid = PID::new(raw_pid);
         Ok(TSPacketHeader {
             transport_error_indicator,
             transport_priority,
@@ -80,7 +158,7 @@ mod tests {
         let packet_header = TSPacketHeader::read_from(f).unwrap();
         assert_eq!(packet_header.transport_error_indicator, false);
         assert_eq!(packet_header.transport_priority, false);
-        assert_eq!(packet_header.pid, 0);
+        assert_eq!(packet_header.pid, PID::new(0));
         assert_eq!(packet_header.transport_scrambling_control, TransportScramblingControl::NotScrambled);
         assert_eq!(packet_header.continuity_counter, 9);
     }
