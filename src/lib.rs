@@ -98,6 +98,27 @@ pub struct TSPacketHeader {
     pub pid: PID,
     pub transport_scrambling_control: TransportScramblingControl,
     pub continuity_counter: u8,
+    pub adaptation_field_control: AdaptationFieldControl,
+
+}
+
+#[derive(PartialEq, Debug)]
+pub enum AdaptationFieldControl {
+    PayloadOnly = 0b01,
+    AdaptationFieldOnly = 0b10,
+    AdaptationFieldAndPayload = 0b11,
+}
+
+impl AdaptationFieldControl {
+    pub fn from_u8(n: u8) -> Result<Self, String> {
+        match n {
+            0b01 => Ok(AdaptationFieldControl::PayloadOnly),
+            0b10 => Ok(AdaptationFieldControl::AdaptationFieldOnly),
+            0b11 => Ok(AdaptationFieldControl::AdaptationFieldAndPayload),
+            0b00 => Err("Reserved for future use".to_string()),
+            _ => Err(format!("Unexpected value: {}", n)),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -118,7 +139,7 @@ impl TSPacketHeader {
             return Err(HeaderParseError::SyncByteNotFound);
         }
         let upper_header = reader.read_u16::<BigEndian>().unwrap();
-        println!("{:b}", upper_header);
+        //println!("{:b}", upper_header);
         let transport_error_indicator = (upper_header & 0x8000) != 0;
         let transport_priority = (upper_header & 0x2000) != 0;
         let raw_pid = upper_header & 0x1FFF;
@@ -134,11 +155,13 @@ impl TSPacketHeader {
             return Err(HeaderParseError::UnkownTransportScrambling);
         }
         let continuity_counter = lower_header & 0b1111;
+        let adaptation_field_control = AdaptationFieldControl::from_u8((lower_header >> 4) & 0b11).unwrap();
         let pid = PID::new(raw_pid);
         Ok(TSPacketHeader {
             transport_error_indicator,
             transport_priority,
             transport_scrambling_control,
+            adaptation_field_control,
             pid,
             continuity_counter,
         })
@@ -154,12 +177,18 @@ mod tests {
 
     #[test]
     fn ts_header_parsing() {
-        let f = File::open("file.ts").expect("ts file not found");
-        let packet_header = TSPacketHeader::read_from(f).unwrap();
-        assert_eq!(packet_header.transport_error_indicator, false);
-        assert_eq!(packet_header.transport_priority, false);
-        assert_eq!(packet_header.pid, PID::new(0));
-        assert_eq!(packet_header.transport_scrambling_control, TransportScramblingControl::NotScrambled);
-        assert_eq!(packet_header.continuity_counter, 9);
+        let mut buf = vec![];
+        let mut f = File::open("file.ts").expect("ts file not found");
+        let _ = f.read_to_end(&mut buf);
+        for raw_packet in buf.chunks_mut(188) {
+            let packet_header = TSPacketHeader::read_from(&mut (raw_packet as &[u8])).unwrap();
+            println!("{:?}", packet_header.adaptation_field_control);
+        }
+        //let packet_header = TSPacketHeader::read_from(f).unwrap();
+        //assert_eq!(packet_header.transport_error_indicator, false);
+        //assert_eq!(packet_header.transport_priority, false);
+        //assert_eq!(packet_header.pid, PID::new(0));
+        //assert_eq!(packet_header.transport_scrambling_control, TransportScramblingControl::NotScrambled);
+        //assert_eq!(packet_header.continuity_counter, 9);
     }
 }
