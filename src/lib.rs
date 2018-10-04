@@ -1,4 +1,5 @@
 extern crate byteorder;
+
 use std::io::{Read};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
@@ -180,15 +181,25 @@ mod tests {
         let mut buf = vec![];
         let mut f = File::open("file.ts").expect("ts file not found");
         let _ = f.read_to_end(&mut buf);
+        let mut count = 0;
         for raw_packet in buf.chunks_mut(188) {
-            let packet_header = TSPacketHeader::read_from(&mut (raw_packet as &[u8])).unwrap();
-            println!("{:?}", packet_header.adaptation_field_control);
+            if count == 0 {
+
+                let packet_header = TSPacketHeader::read_from(&mut raw_packet.as_ref()).unwrap();
+                assert_eq!(packet_header.transport_error_indicator, false);
+                assert_eq!(packet_header.transport_priority, false);
+                assert_eq!(packet_header.pid.as_u16(), 0);
+                assert_eq!(packet_header.transport_scrambling_control, TransportScramblingControl::NotScrambled);
+                assert_eq!(packet_header.adaptation_field_control, AdaptationFieldControl::PayloadOnly);
+                assert_eq!(packet_header.continuity_counter, 9);
+            }
+            count += 1;
         }
-        //let packet_header = TSPacketHeader::read_from(f).unwrap();
-        //assert_eq!(packet_header.transport_error_indicator, false);
+        println!("counted {} packets", count);
         //assert_eq!(packet_header.transport_priority, false);
         //assert_eq!(packet_header.pid, PID::new(0));
         //assert_eq!(packet_header.transport_scrambling_control, TransportScramblingControl::NotScrambled);
         //assert_eq!(packet_header.continuity_counter, 9);
     }
 }
+
